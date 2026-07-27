@@ -1,0 +1,242 @@
+#!/usr/bin/env python3
+"""
+control_lane.py
+---------------
+ROS1 node: subscribes to the normalized lane-center offset published by
+detect_lane.py and runs a PD controller to steer the robot, publishing
+geometry_msgs/Twist to /cmd_vel.
+
+NEW: if the lane stays lost for more than `blind_turn_trigger_timeout`
+seconds, instead of just slowing/stopping, the robot executes a BLIND,
+odometry-tracked turn in a known direction (`blind_turn_direction`) for
+`blind_turn_degrees` -- matching how ROBOTIS's own AutoRace handles sharp
+turns/intersections: don't try to keep tracking vision through a turn too
+sharp for the camera to follow, just execute the known maneuver open-loop
+and hand control back to vision once it's done or the lane is reacquired,
+whichever comes first.
+
+Subscribes:
+  /detect/lane_center   std_msgs/Float64      normalized offset in [-1, 1] (NaN = lane lost)
+  /odom                 nav_msgs/Odometry     used only for tracking yaw during a blind turn
+
+Publishes:
+  ~cmd_vel_topic (default /cmd_vel)   geometry_msgs/Twist
+"""
+
+import math
+import rospy
+from std_msgs.msg import Float64
+from geometry_msgs.msg import Twist
+from nav_msgs.msg import Odometry
+
+
+def yaw_from_quaternion(q):
+    """Extract yaw (rotation about Z) from a geometry_msgs/Quaternion,
+    without needing the tf package."""
+    siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
+    cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
+    return math.atan2(siny_cosp, cosy_cosp)
+
+
+def normalize_angle(angle):
+    """Wrap an angle to [-pi, pi]."""
+    while angle > math.pi:
+        angle -= 2.0 * math.pi
+    while angle < -math.pi:
+        angle += 2.0 * math.pi
+    return angle
+
+
+class ControlLane:
+    def __init__(self):
+        rospy.init_node("control_lane", anonymous=False)
+
+        self.cmd_vel_topic = rospy.get_param("~cmd_vel_topic", "/cmd_vel")
+        self.linear_speed  = rospy.get_param("~linear_speed", 0.2)
+        self.kp = rospy.get_param("~kp", 1.0)
+        self.kd = rospy.get_param("~kd", 0.5)
+        self.max_ang_vel = rospy.get_param("~max_ang_vel", 1.5)
+        self.min_speed_fraction = rospy.get_param("~min_speed_fraction", 0.3)  # slowest fraction of linear_speed during sharp corrections
+        self.speed_falloff_exponent = rospy.get_param("~speed_falloff_exponent", 2.2)  # ROBOTIS uses 2.2 -- higher = sharper slowdown in corners
+        self.lost_lane_timeout = rospy.get_param("~lost_lane_timeout", 4.0)  # full stop if STILL lost after this
+
+        # ---- Position-triggered maneuver (for a KNOWN fixed obstruction,
+        # e.g. a support beam physically blocking the camera at one exact
+        # spot on a fixed track) ----
+        # Triggers off the robot's actual (x,y) position from odometry,
+        # not off vision going uncertain -- removes the timing/threshold
+        # guesswork of a vision-triggered blind turn, since the obstruction
+        # is always in the same place every run.
+        self.position_maneuver_enabled = rospy.get_param("~position_maneuver_enabled", False)
+        self.maneuver_trigger_x = rospy.get_param("~maneuver_trigger_x", 1.02)
+        self.maneuver_trigger_y = rospy.get_param("~maneuver_trigger_y", 2.75)
+        self.maneuver_trigger_radius = rospy.get_param("~maneuver_trigger_radius", 0.3)
+        self.maneuver_angular_z = rospy.get_param("~maneuver_angular_z", 0.6)
+        self.maneuver_linear_x = rospy.get_param("~maneuver_linear_x", 0.06)
+        self.maneuver_duration = rospy.get_param("~maneuver_duration", 2.0)
+
+        self.current_x = None
+        self.current_y = None
+        self.in_position_maneuver = False
+        self.position_maneuver_start_time = None
+        self.position_maneuver_done = False  # only fire once per run
+
+        # ---- Blind turn params ----
+        self.blind_turn_enabled = rospy.get_param("~blind_turn_enabled", True)
+        self.blind_turn_trigger_timeout = rospy.get_param("~blind_turn_trigger_timeout", 0.6)  # sec of NaN before triggering
+        self.blind_turn_direction = rospy.get_param("~blind_turn_direction", "left")  # "left" or "right"
+        self.blind_turn_degrees = rospy.get_param("~blind_turn_degrees", 90.0)
+        self.blind_turn_angular_speed = rospy.get_param("~blind_turn_angular_speed", 0.6)  # rad/s
+        self.blind_turn_linear_speed = rospy.get_param("~blind_turn_linear_speed", 0.08)   # m/s, slow through the blind turn
+
+        self.last_error = 0.0
+        self.last_angular_z = 0.0
+        self.angular_z_trend = 0.0  # rad/s^2 -- how fast the turn rate itself is changing
+        self.last_command_time = rospy.Time.now()
+        self.coast_gain = rospy.get_param("~coast_trend_gain", 1.0)  # >1 = extrapolate trend more aggressively
+        self.last_valid_time = rospy.Time.now()
+        self.have_lane = False
+        self.lane_lost_since = None
+
+        self.current_yaw = None
+        self.in_blind_turn = False
+        self.blind_turn_start_yaw = None
+
+        self.cmd_pub = rospy.Publisher(self.cmd_vel_topic, Twist, queue_size=1)
+        self.center_sub = rospy.Subscriber("/detect/lane_center", Float64, self.center_callback, queue_size=1)
+        self.odom_sub = rospy.Subscriber("/odom", Odometry, self.odom_callback, queue_size=1)
+
+        # Watchdog: if we're STILL lost even after a blind turn completes
+        # (or blind turns are disabled), come to a full stop.
+        self.timer = rospy.Timer(rospy.Duration(0.2), self.watchdog)
+
+        rospy.loginfo("control_lane node started (blind_turn_enabled=%s, direction=%s)",
+                      self.blind_turn_enabled, self.blind_turn_direction)
+
+    # ------------------------------------------------------------------
+    def odom_callback(self, msg):
+        self.current_yaw = yaw_from_quaternion(msg.pose.pose.orientation)
+        self.current_x = msg.pose.pose.position.x
+        self.current_y = msg.pose.pose.position.y
+
+        if self.position_maneuver_enabled and not self.position_maneuver_done and not self.in_position_maneuver:
+            dist = math.hypot(self.current_x - self.maneuver_trigger_x, self.current_y - self.maneuver_trigger_y)
+            if dist <= self.maneuver_trigger_radius:
+                rospy.loginfo("control_lane: reached beam position (dist=%.2fm) -- starting blind maneuver", dist)
+                self.in_position_maneuver = True
+                self.position_maneuver_start_time = rospy.Time.now()
+
+        if self.in_position_maneuver:
+            elapsed = (rospy.Time.now() - self.position_maneuver_start_time).to_sec()
+            if elapsed >= self.maneuver_duration:
+                rospy.loginfo("control_lane: position maneuver complete, resuming vision")
+                self.in_position_maneuver = False
+                self.position_maneuver_done = True
+                self.last_error = 0.0
+                return
+            self.publish_cmd(self.maneuver_angular_z, self.maneuver_linear_x)
+            return  # skip blind-turn logic below while the position maneuver is active
+
+        if self.in_blind_turn and self.blind_turn_start_yaw is not None:
+            turned = normalize_angle(self.current_yaw - self.blind_turn_start_yaw)
+            target = math.radians(self.blind_turn_degrees)
+            if self.blind_turn_direction == "right":
+                turned = -turned  # measure progress as a positive number regardless of direction
+
+            if turned >= target - math.radians(3.0):  # small tolerance
+                rospy.loginfo("control_lane: blind turn complete (%.1f deg), resuming vision", math.degrees(turned))
+                self.in_blind_turn = False
+                self.blind_turn_start_yaw = None
+                self.last_error = 0.0
+                return
+
+            sign = 1.0 if self.blind_turn_direction == "left" else -1.0
+            self.publish_cmd(sign * self.blind_turn_angular_speed, self.blind_turn_linear_speed)
+
+    # ------------------------------------------------------------------
+    def center_callback(self, msg):
+        error = msg.data
+
+        if self.in_position_maneuver:
+            return  # odom_callback is driving the robot during the position-triggered maneuver
+
+        if self.in_blind_turn:
+            return  # odom_callback is driving the robot during a blind turn; ignore vision until it's done
+
+        if math.isnan(error):
+            if self.have_lane:
+                # Just transitioned from tracking to lost -- start the clock.
+                self.lane_lost_since = rospy.Time.now()
+            self.have_lane = False
+
+            lost_duration = (rospy.Time.now() - self.lane_lost_since).to_sec() if self.lane_lost_since else 0.0
+
+            if self.blind_turn_enabled and lost_duration >= self.blind_turn_trigger_timeout and self.current_yaw is not None:
+                rospy.loginfo("control_lane: lane lost %.1fs -- starting blind %s turn",
+                              lost_duration, self.blind_turn_direction)
+                self.in_blind_turn = True
+                self.blind_turn_start_yaw = self.current_yaw
+                return
+
+            # Not yet time to blind-turn (or blind turn disabled): coast on
+            # the LAST KNOWN turn rate, EXTRAPOLATED using its recent trend,
+            # rather than freezing at a single snapshot value. If the robot
+            # was turning progressively harder approaching a tightening
+            # curve, keep ramping that same way through a brief physical
+            # occlusion (e.g. driving under a support beam) instead of
+            # flatlining -- much better matches a curve that keeps curving.
+            elapsed_lost = (rospy.Time.now() - self.lane_lost_since).to_sec() if self.lane_lost_since else 0.0
+            coasted_angular_z = self.last_angular_z + self.coast_gain * self.angular_z_trend * elapsed_lost
+            coasted_angular_z = max(-self.max_ang_vel, min(self.max_ang_vel, coasted_angular_z))
+            self.publish_cmd(coasted_angular_z, self.linear_speed * 0.4)
+            return
+
+        self.have_lane = True
+        self.lane_lost_since = None
+        self.last_valid_time = rospy.Time.now()
+
+        derivative = error - self.last_error
+        self.last_error = error
+
+        angular_z = -(self.kp * error + self.kd * derivative)
+        angular_z = max(-self.max_ang_vel, min(self.max_ang_vel, angular_z))
+
+        now_time = rospy.Time.now()
+        dt_cmd = (now_time - self.last_command_time).to_sec()
+        if dt_cmd > 1e-3:
+            raw_trend = (angular_z - self.last_angular_z) / dt_cmd
+            # Light smoothing so one noisy frame doesn't spike the trend estimate
+            self.angular_z_trend = 0.7 * self.angular_z_trend + 0.3 * raw_trend
+        self.last_command_time = now_time
+        self.last_angular_z = angular_z
+
+        # Power-law speed reduction (ROBOTIS-style): the exponent makes speed
+        # drop off much more sharply as error grows than a linear formula
+        # would, giving more effective slowdown through real corners.
+        speed_factor = max(0.0, 1.0 - min(abs(error), 1.0)) ** self.speed_falloff_exponent
+        linear_x = self.linear_speed * max(self.min_speed_fraction, speed_factor)
+
+        self.publish_cmd(angular_z, linear_x)
+
+    def watchdog(self, event):
+        if self.in_position_maneuver or self.in_blind_turn:
+            return  # maneuver/blind-turn logic manages its own commands via odom_callback
+        elapsed = (rospy.Time.now() - self.last_valid_time).to_sec()
+        if elapsed > self.lost_lane_timeout and not self.have_lane:
+            rospy.logwarn_throttle(2.0, "control_lane: lane lost for %.1fs, stopping", elapsed)
+            self.publish_cmd(0.0, 0.0)
+
+    def publish_cmd(self, angular_z, linear_x):
+        twist = Twist()
+        twist.linear.x = linear_x
+        twist.angular.z = angular_z
+        self.cmd_pub.publish(twist)
+
+    def stop(self):
+        self.publish_cmd(0.0, 0.0)
+
+
+if __name__ == "__main__":
+    node = ControlLane()
+    rospy.on_shutdown(node.stop)
+    rospy.spin()

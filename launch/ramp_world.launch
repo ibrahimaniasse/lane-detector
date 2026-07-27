@@ -1,0 +1,33 @@
+<launch>
+  <!-- Which TurtleBot3 model to spawn: burger, waffle, or waffle_pi.
+       Defaults to your TURTLEBOT3_MODEL env var (currently "burger"). -->
+  <arg name="model" default="$(env TURTLEBOT3_MODEL)"/>
+
+  <!-- Where to spawn the robot in the world (position + heading) -->
+  <arg name="x_pos" default="1.05"/>
+  <arg name="y_pos" default="1.3"/>
+  <arg name="z_pos" default="0.0"/>
+  <arg name="yaw" default="1.5708"/>  <!-- heading in radians. 0 = facing +X, 1.5708 = facing +Y, 3.1416 = facing -X -->
+
+  <!-- Make sure Gazebo can find any custom models referenced by ramp_world.world
+       (e.g. traffic light models) that live in this package's models/ folder -->
+  <env name="GAZEBO_MODEL_PATH" value="$(find lane_detector)/models:$(optenv GAZEBO_MODEL_PATH)"/>
+
+  <!-- Start Gazebo with YOUR world file instead of the default empty world -->
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="world_name" value="$(find lane_detector)/worlds/ramp_world.world"/>
+    <arg name="paused" value="false"/>
+    <arg name="use_sim_time" value="true"/>
+    <arg name="gui" value="true"/>
+    <arg name="headless" value="false"/>
+    <arg name="debug" value="false"/>
+  </include>
+
+  <!-- Load the robot's URDF (from turtlebot3_description) onto the param server -->
+  <param name="robot_description"
+         command="$(find xacro)/xacro --inorder $(find lane_detector)/urdf/turtlebot3_burger_high_traction.urdf.xacro" />
+
+  <!-- Spawn the robot into the running Gazebo world -->
+  <node pkg="gazebo_ros" type="spawn_model" name="spawn_urdf" output="screen"
+        args="-urdf -model turtlebot3_$(arg model) -x $(arg x_pos) -y $(arg y_pos) -z $(arg z_pos) -Y $(arg yaw) -param robot_description" />
+</launch>
