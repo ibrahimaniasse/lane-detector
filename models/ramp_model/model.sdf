@@ -3,24 +3,94 @@
   <model name="ramp_model">
     <static>true</static>
     <link name="link">
-      <collision name="collision">
+
+      <!-- ============================================================
+           COLLISION GEOMETRY — simplified box primitives
+           ============================================================
+           The visual mesh (ramp.dae) is a detailed ~3700-tri Collada
+           export.  Using it directly as a collision mesh causes ODE
+           trimesh contact instability (jitter, slippage).
+
+           Instead we approximate the track surface with a small set
+           of boxes.  Dimensions and poses below are conservative
+           first-pass estimates — adjust after testing in Gazebo.
+           ============================================================ -->
+
+      <!-- Flat track section (main loop surface) -->
+      <collision name="collision_flat_track">
+        <pose>1.0 1.5 -0.005  0 0 0</pose>
         <geometry>
-          <mesh><uri>model://ramp_model/meshes/ramp.dae</uri></mesh>
+          <box><size>3.0 4.0 0.01</size></box>
         </geometry>
         <surface>
           <friction>
             <ode>
-              <mu>3.0</mu>
-              <mu2>3.0</mu2>
+              <mu>1.0</mu>
+              <mu2>1.0</mu2>
             </ode>
           </friction>
         </surface>
       </collision>
+
+      <!-- Ramp incline surface -->
+      <collision name="collision_ramp_incline">
+        <!-- Tilted ~15 deg about Y to match the visible ramp slope.
+             Position centered on the ramp's midpoint along the track. -->
+        <pose>1.0 3.2 0.12  0 -0.26 0</pose>
+        <geometry>
+          <box><size>0.6 0.5 0.01</size></box>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>1.0</mu>
+              <mu2>1.0</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+
+      <!-- Ramp top (flat landing) -->
+      <collision name="collision_ramp_top">
+        <pose>1.0 3.55 0.24  0 0 0</pose>
+        <geometry>
+          <box><size>0.6 0.3 0.01</size></box>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>1.0</mu>
+              <mu2>1.0</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+
+      <!-- Ramp descent -->
+      <collision name="collision_ramp_descent">
+        <pose>1.0 3.85 0.12  0 0.26 0</pose>
+        <geometry>
+          <box><size>0.6 0.5 0.01</size></box>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>1.0</mu>
+              <mu2>1.0</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+
+      <!-- ============================================================
+           VISUAL GEOMETRY — full-detail mesh (unchanged)
+           ============================================================ -->
       <visual name="visual">
         <geometry>
           <mesh><uri>model://ramp_model/meshes/ramp.dae</uri></mesh>
         </geometry>
       </visual>
+
     </link>
   </model>
 </sdf>
