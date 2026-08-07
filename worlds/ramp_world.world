@@ -1,15 +1,51 @@
 <?xml version="1.0"?>
-<sdf version="1.6">
-  <world name="default">
+<sdf version="1.8">
+  <world name="ramp_world">
+
+    <!-- ============================================================
+         Physics and required system plugins for Gazebo Harmonic
+         ============================================================ -->
+    <physics name="1ms" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+
+    <plugin filename="gz-sim-physics-system"
+            name="gz::sim::systems::Physics"/>
+
+    <plugin filename="gz-sim-user-commands-system"
+            name="gz::sim::systems::UserCommands"/>
+
+    <plugin filename="gz-sim-scene-broadcaster-system"
+            name="gz::sim::systems::SceneBroadcaster"/>
+
+    <!-- Required for camera, LiDAR, and IMU sensors -->
+    <plugin filename="gz-sim-sensors-system"
+            name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+
+    <plugin filename="gz-sim-imu-system"
+            name="gz::sim::systems::Imu"/>
+
+    <!-- ============================================================
+         Lighting and environment
+         ============================================================ -->
     <include>
       <uri>model://sun</uri>
     </include>
+
     <include>
       <uri>model://ground_plane</uri>
     </include>
+
+    <!-- ============================================================
+         Custom ramp track model
+         ============================================================ -->
     <include>
       <uri>model://ramp_model</uri>
       <pose>0 0 0 0 0 0</pose>
     </include>
+
   </world>
 </sdf>
