@@ -1,6 +1,6 @@
 # Lane Detector — Ramp World
 
-ROS 1 Noetic + Gazebo Classic lane-following package for a **TurtleBot3 Burger**
+ROS 2 Jazzy + Gazebo Harmonic lane-following package for a **TurtleBot3 Burger**
 on a custom track featuring a ramp, sharp turns, and a physical support beam
 that occludes the camera at one point.
 
@@ -8,12 +8,12 @@ The robot follows **yellow** (left) and **white** (right) lane markings using an
 OpenCV bird's-eye-view pipeline inspired by the
 [ROBOTIS AutoRace](https://emanual.robotis.com/docs/en/platform/turtlebot3/autonomous_driving/#autonomous-driving)
 approach: perspective warp → HSV color masking → sliding-window polynomial fit →
-PD steering.  A separate blind-maneuver node handles the beam-occluded section
+PD steering. A separate blind-maneuver node handles the beam-occluded section
 by driving open-loop based on odometry position.
 
-> **Forked from** [`laxmiprasad-vijaykumar/lane-detector`](https://github.com/laxmiprasad-vijaykumar/lane-detector).
-> Taken over as an independent portfolio project with incremental development,
-> proper packaging, and further improvements.
+> **Forked from** [`laxmiprasad-vijaykumar/lane-detector`](https://github.com/laxmiprasad-vijaykumar/lane-detector)
+> (originally ROS 1 Noetic). Taken over as an independent portfolio project,
+> fully ported to **ROS 2 Jazzy + Gazebo Harmonic**.
 
 ---
 
@@ -57,17 +57,25 @@ by driving open-loop based on odometry position.
 ## Prerequisites
 
 | Dependency | Version |
-|-----------|---------|
-| Ubuntu | 20.04 (Focal) |
-| ROS | Noetic |
-| Gazebo | Classic 11.x |
-| Python | 3.8+ |
+|-----------|----------|
+| Ubuntu | 24.04 (Noble) |
+| ROS | 2 Jazzy |
+| Gazebo | Harmonic (gz-sim) |
+| Python | 3.10+ |
 | OpenCV | via `cv_bridge` |
-| TurtleBot3 packages | `turtlebot3`, `turtlebot3_description`, `turtlebot3_simulations` |
 
 ```bash
-# Install TurtleBot3 packages if not already present
-sudo apt install ros-noetic-turtlebot3 ros-noetic-turtlebot3-simulations
+# Install required ROS 2 packages
+sudo apt install -y \
+  ros-jazzy-turtlebot3-description \
+  ros-jazzy-ros-gz-sim \
+  ros-jazzy-ros-gz-bridge \
+  ros-jazzy-ros-gz-image \
+  ros-jazzy-cv-bridge \
+  ros-jazzy-xacro \
+  ros-jazzy-robot-state-publisher \
+  python3-colcon-common-extensions
+
 echo "export TURTLEBOT3_MODEL=burger" >> ~/.bashrc
 source ~/.bashrc
 ```
@@ -77,23 +85,23 @@ source ~/.bashrc
 ## Build & Run
 
 ```bash
-# 1. Clone into your catkin workspace
-cd ~/catkin_ws/src
+# 1. Clone into your colcon workspace
+mkdir -p ~/ros2_ws/src && cd ~/ros2_ws/src
 git clone https://github.com/ibrahimaniasse/lane-detector.git
 
 # 2. Build
-cd ~/catkin_ws
-catkin_make   # or: catkin build lane_detector
+cd ~/ros2_ws
+colcon build --packages-select lane_detector
 
 # 3. Source
-source devel/setup.bash
+source install/setup.bash
 
-# 4. Launch everything (Gazebo + robot + detection + control)
-roslaunch lane_detector ramp_world.launch
+# 4. Launch everything (Gazebo Harmonic + robot + detection + control)
+ros2 launch lane_detector ramp_world.launch.py
 ```
 
-One command brings up the full stack.  The robot should start driving and
-following the lane markings autonomously.
+One command brings up the full stack. The robot starts driving and
+following the lane markings autonomously after a ~5 second Gazebo startup delay.
 
 ---
 
