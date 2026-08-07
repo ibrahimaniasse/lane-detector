@@ -7,13 +7,15 @@
   <arg name="x_pos" default="1.05"/>
   <arg name="y_pos" default="1.3"/>
   <arg name="z_pos" default="0.0"/>
-  <arg name="yaw" default="1.5708"/>  <!-- heading in radians. 0 = facing +X, 1.5708 = facing +Y, 3.1416 = facing -X -->
+  <arg name="yaw" default="1.5708"/>  <!-- heading in radians. 0 = facing +X, 1.5708 = facing +Y -->
 
   <!-- Make sure Gazebo can find any custom models referenced by ramp_world.world
-       (e.g. traffic light models) that live in this package's models/ folder -->
+       (e.g. ramp_model) that live in this package's models/ folder -->
   <env name="GAZEBO_MODEL_PATH" value="$(find lane_detector)/models:$(optenv GAZEBO_MODEL_PATH)"/>
 
-  <!-- Start Gazebo with YOUR world file instead of the default empty world -->
+  <!-- ============================================================
+       Gazebo: load the world and spawn the robot
+       ============================================================ -->
   <include file="$(find gazebo_ros)/launch/empty_world.launch">
     <arg name="world_name" value="$(find lane_detector)/worlds/ramp_world.world"/>
     <arg name="paused" value="false"/>
@@ -23,11 +25,24 @@
     <arg name="debug" value="false"/>
   </include>
 
-  <!-- Load the robot's URDF (from turtlebot3_description) onto the param server -->
+  <!-- Load the robot's URDF (custom high-traction variant) -->
   <param name="robot_description"
          command="$(find xacro)/xacro --inorder $(find lane_detector)/urdf/turtlebot3_burger_high_traction.urdf.xacro" />
 
   <!-- Spawn the robot into the running Gazebo world -->
   <node pkg="gazebo_ros" type="spawn_model" name="spawn_urdf" output="screen"
         args="-urdf -model turtlebot3_$(arg model) -x $(arg x_pos) -y $(arg y_pos) -z $(arg z_pos) -Y $(arg yaw) -param robot_description" />
+
+  <!-- ============================================================
+       Lane detection + control pipeline
+       ============================================================ -->
+
+  <!-- Vision: bird's-eye warp, yellow/white mask, sliding-window fit -->
+  <node pkg="lane_detector" type="detect_lane.py" name="detect_lane" output="screen" />
+
+  <!-- PD controller: steers based on lane-center offset from detect_lane -->
+  <node pkg="lane_detector" type="control_lane.py" name="control_lane" output="screen" />
+
+  <!-- Blind maneuver: takes over cmd_vel at the beam-occlusion point -->
+  <node pkg="lane_detector" type="control_blind.py" name="control_blind" output="screen" />
 </launch>
