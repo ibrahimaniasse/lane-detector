@@ -40,9 +40,10 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'detect_lane  = lane_detector.detect_lane:main',
-            'control_lane = lane_detector.control_lane:main',
+            'detect_lane   = lane_detector.detect_lane:main',
+            'control_lane  = lane_detector.control_lane:main',
             'control_blind = lane_detector.control_blind:main',
+            'test_ramp_climb = lane_detector.test_ramp_climb:main',
         ],
     },
 )
