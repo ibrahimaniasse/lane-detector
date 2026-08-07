@@ -7,7 +7,7 @@ Drives the TurtleBot3 straight forward along +Y up the ramp, monitoring
 odometry altitude (Z) and distance traveled.
 
 Usage:
-  ros2 run lane_detector test_ramp_climb
+  ros2 run lane_detector test_ramp_climb --ros-args -p use_sim_time:=true
 """
 
 import rclpy
@@ -21,16 +21,19 @@ class TestRampClimb(Node):
         super().__init__('test_ramp_climb')
 
         self.declare_parameter('speed', 0.2)
-        self.declare_parameter('target_z', 0.20)  # Top elevation threshold
-        self.declare_parameter('timeout_sec', 20.0)
+        self.declare_parameter('target_z', 0.15)     # Altitude threshold for climbing
+        self.declare_parameter('timeout_sec', 60.0)  # 60s timeout
+        self.declare_parameter('use_sim_time', True)
 
         self.speed = self.get_parameter('speed').value
         self.target_z = self.get_parameter('target_z').value
         self.timeout_sec = self.get_parameter('timeout_sec').value
 
-        self.start_time = self.get_clock().now()
+        self.start_time = None
         self.start_y = None
+        self.current_z = 0.0
         self.max_z = 0.0
+        self.odom_received = False
         self.success = False
 
         self.cmd_pub = self.create_publisher(Twist, '/cmd_vel', 10)
@@ -42,20 +45,26 @@ class TestRampClimb(Node):
         self.get_logger().info(
             f'=== Ramp Climb Test Node Started ===\n'
             f'Target Speed: {self.speed} m/s | Target Height (Z): >= {self.target_z:.2f}m\n'
-            f'Driving forward to climb ramp...')
+            f'Waiting for /odom messages to begin driving...')
 
     def odom_callback(self, msg):
         pos = msg.pose.pose.position
-        if self.start_y is None:
+        self.current_z = pos.z
+
+        if not self.odom_received:
+            self.odom_received = True
             self.start_y = pos.y
+            self.start_time = self.get_clock().now()
+            self.get_logger().info(
+                f'✅ /odom received! Initial Y={self.start_y:.2f}m, Z={pos.z:.3f}m. Starting drive...')
 
         if pos.z > self.max_z:
             self.max_z = pos.z
 
-        dist_y = pos.y - self.start_y
+        dist_y = pos.y - self.start_y if self.start_y is not None else 0.0
         self.get_logger().info(
             f'Position: Y={pos.y:.2f}m (dist={dist_y:.2f}m) | Height Z={pos.z:.3f}m | Max Z={self.max_z:.3f}m',
-            throttle_duration_sec=0.5)
+            throttle_duration_sec=1.0)
 
         if pos.z >= self.target_z and not self.success:
             self.success = True
@@ -63,10 +72,12 @@ class TestRampClimb(Node):
                 f'🎉 SUCCESS! Robot climbed to top of ramp! Peak altitude Z = {pos.z:.3f}m')
 
     def control_loop(self):
+        if not self.odom_received:
+            return  # Wait for first odom message
+
         elapsed = (self.get_clock().now() - self.start_time).nanoseconds / 1e9
 
         if self.success:
-            # Hold position / slow stop
             self.publish_cmd(0.0, 0.0)
             return
 
