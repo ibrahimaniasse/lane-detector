@@ -38,7 +38,11 @@
        ============================================================ -->
 
   <!-- Vision: bird's-eye warp, yellow/white mask, sliding-window fit -->
-  <node pkg="lane_detector" type="detect_lane.py" name="detect_lane" output="screen" />
+  <!-- image_topic must match what the Gazebo camera plugin publishes:
+       cameraName=camera + imageTopicName=image → /camera/image -->
+  <node pkg="lane_detector" type="detect_lane.py" name="detect_lane" output="screen">
+    <param name="image_topic" value="/camera/image"/>
+  </node>
 
   <!-- PD controller: steers based on lane-center offset from detect_lane -->
   <node pkg="lane_detector" type="control_lane.py" name="control_lane" output="screen" />
