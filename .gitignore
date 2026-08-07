@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# macOS
+.DS_Store
+
+# ROS / catkin build artifacts
+build/
+devel/
+install/
+logs/
+.catkin_workspace
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
