@@ -23,7 +23,9 @@ class TestRampClimb(Node):
         self.declare_parameter('speed', 0.2)
         self.declare_parameter('target_z', 0.15)     # Altitude threshold for climbing
         self.declare_parameter('timeout_sec', 60.0)  # 60s timeout
-        self.declare_parameter('use_sim_time', True)
+
+        if not self.has_parameter('use_sim_time'):
+            self.declare_parameter('use_sim_time', True)
 
         self.speed = self.get_parameter('speed').value
         self.target_z = self.get_parameter('target_z').value
