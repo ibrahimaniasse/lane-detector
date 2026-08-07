@@ -120,7 +120,11 @@ class ControlLane(Node):
         self.cmd_pub.publish(twist)
 
     def stop(self):
-        self.publish_cmd(0.0, 0.0)
+        if rclpy.ok():
+            try:
+                self.publish_cmd(0.0, 0.0)
+            except Exception:
+                pass
 
 
 def main(args=None):
@@ -128,12 +132,13 @@ def main(args=None):
     node = ControlLane()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, rclpy.executors.ExternalShutdownException):
         pass
     finally:
         node.stop()
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':

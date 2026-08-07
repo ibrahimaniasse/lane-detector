@@ -21,7 +21,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (DeclareLaunchArgument, IncludeLaunchDescription,
-                             TimerAction)
+                             TimerAction, AppendEnvironmentVariable)
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import Command, LaunchConfiguration
 from launch_ros.actions import Node
@@ -131,7 +131,12 @@ def generate_launch_description():
         actions=[detect_lane, control_lane, control_blind],
     )
 
+    models_path = AppendEnvironmentVariable(
+        name='GZ_SIM_RESOURCE_PATH',
+        value=os.path.join(pkg, 'models'))
+
     return LaunchDescription([
+        models_path,
         DeclareLaunchArgument('x_pos', default_value='1.05'),
         DeclareLaunchArgument('y_pos', default_value='1.3'),
         DeclareLaunchArgument('z_pos', default_value='0.01'),
