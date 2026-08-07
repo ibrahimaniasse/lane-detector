@@ -74,23 +74,19 @@ def generate_launch_description():
     )
 
     # ---- ros_gz_bridge: gz topics ↔ ROS 2 ----
-    # Format:  /topic@ros_type@gz_type
-    #   [  = ROS 2 → gz only
-    #   ]  = gz → ROS 2 only
-    #   @  = bidirectional
     bridge = Node(
         package='ros_gz_bridge',
         executable='parameter_bridge',
         name='ros_gz_bridge',
         arguments=[
-            '/cmd_vel@geometry_msgs/msg/Twist[gz.msgs.Twist',
-            '/odom@nav_msgs/msg/Odometry]gz.msgs.Odometry',
-            '/tf@tf2_msgs/msg/TFMessage]gz.msgs.Pose_V',
-            '/joint_states@sensor_msgs/msg/JointState]gz.msgs.Model',
-            '/camera/image@sensor_msgs/msg/Image]gz.msgs.Image',
-            '/camera/camera_info@sensor_msgs/msg/CameraInfo]gz.msgs.CameraInfo',
-            '/imu@sensor_msgs/msg/Imu]gz.msgs.IMU',
-            '/scan@sensor_msgs/msg/LaserScan]gz.msgs.LaserScan',
+            '/cmd_vel@geometry_msgs/msg/Twist@gz.msgs.Twist',
+            '/odom@nav_msgs/msg/Odometry@gz.msgs.Odometry',
+            '/tf@tf2_msgs/msg/TFMessage@gz.msgs.Pose_V',
+            '/joint_states@sensor_msgs/msg/JointState@gz.msgs.Model',
+            '/camera/image@sensor_msgs/msg/Image@gz.msgs.Image',
+            '/camera/camera_info@sensor_msgs/msg/CameraInfo@gz.msgs.CameraInfo',
+            '/imu@sensor_msgs/msg/Imu@gz.msgs.IMU',
+            '/scan@sensor_msgs/msg/LaserScan@gz.msgs.LaserScan',
         ],
         parameters=[{'use_sim_time': True}],
         output='screen',
